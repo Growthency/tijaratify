@@ -39,6 +39,19 @@ export function formatDate(iso: string, locale = "en-GB"): string {
   });
 }
 
+/** Date + time, e.g. "5 Jun 2026, 14:32". */
+export function formatDateTime(iso: string, locale = "en-GB"): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** Estimate reading time (words / 200wpm) from plain text or HTML. */
 export function estimateReadingTime(text: string): number {
   const words = text.replace(/<[^>]+>/g, " ").trim().split(/\s+/).length;

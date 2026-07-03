@@ -14,6 +14,9 @@ import {
   Store,
   Menu,
   X,
+  ShoppingCart,
+  PackageCheck,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,6 +35,9 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { label: "Orders", href: "/admin/orders", icon: ShoppingCart, startsWith: true },
+  { label: "Fulfilled", href: "/admin/fulfilled", icon: PackageCheck, startsWith: true },
+  { label: "Returns", href: "/admin/returns", icon: Undo2, startsWith: true },
   { label: "Products", href: "/admin/products", icon: Package, startsWith: true },
   { label: "Categories", href: "/admin/categories", icon: Shapes, startsWith: true },
   { label: "Journal", href: "/admin/blog", icon: Newspaper, startsWith: true },

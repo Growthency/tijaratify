@@ -71,9 +71,13 @@ export function CheckoutForm() {
   const [values, setValues] = useState<Fields>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
   const [status, setStatus] = useState<"idle" | "processing" | "done">("idle");
-  const [orderNo] = useState(
+  // Fallback number shown if the order can't be saved; replaced by the real
+  // stored number when the API responds.
+  const [orderNo, setOrderNo] = useState(
     () => `JC-${Math.floor(100000 + Math.random() * 900000)}`
   );
+  // Snapshot the total for the confirmation screen before the cart is cleared.
+  const [confirmedTotal, setConfirmedTotal] = useState("");
 
   const set =
     (key: keyof Fields) =>
@@ -107,7 +111,7 @@ export function CheckoutForm() {
     return Object.keys(next).length === 0;
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (status === "processing") return;
     if (!validate()) {
@@ -115,12 +119,55 @@ export function CheckoutForm() {
       return;
     }
     setStatus("processing");
-    // Simulate a payment round-trip.
-    setTimeout(() => {
-      setStatus("done");
-      clear();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }, 1700);
+
+    // Save the order (no card details are sent or stored).
+    const payload = {
+      customerName: values.name,
+      customerEmail: values.email,
+      customerPhone: values.phone,
+      address: values.address,
+      city: values.city,
+      region: values.region,
+      postcode: values.postcode,
+      country: values.country,
+      deliveryZone,
+      subtotal,
+      delivery,
+      discount,
+      total,
+      currency,
+      promoCode,
+      paymentMethod: "card",
+      items: items.map((i) => ({
+        productId: i.productId,
+        slug: i.slug,
+        name: i.name,
+        image: i.image,
+        quantity: i.quantity,
+        unitPrice: i.price,
+        lineTotal: i.price * i.quantity,
+        size: i.size,
+        color: i.color,
+        currency: i.currency,
+      })),
+    };
+
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.orderNo) setOrderNo(data.orderNo);
+    } catch {
+      // Never block the customer — show confirmation even if saving hiccuped.
+    }
+
+    setConfirmedTotal(formatPrice(total, currency));
+    setStatus("done");
+    clear();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const firstName = useMemo(
@@ -134,7 +181,7 @@ export function CheckoutForm() {
         orderNo={orderNo}
         firstName={firstName}
         email={values.email}
-        total={formatPrice(total, currency)}
+        total={confirmedTotal || formatPrice(total, currency)}
       />
     );
   }
