@@ -74,6 +74,26 @@ export interface DeliverySettings {
   outsideDhaka: number;
 }
 
+/** A mobile-wallet method (bKash / Nagad / Rocket). */
+export interface WalletMethod {
+  enabled: boolean;
+  /** The number the customer should "Send Money" to. */
+  number: string;
+}
+
+/** Payment methods offered at checkout — the customer picks one. */
+export interface PaymentSettings {
+  /** Pay in cash when the order is delivered. */
+  cashOnDelivery: boolean;
+  bkash: WalletMethod;
+  nagad: WalletMethod;
+  rocket: WalletMethod;
+  /** Bank transfer with free-text account details. */
+  bank: { enabled: boolean; details: string };
+  /** Demo card form — no real charge is taken. */
+  card: boolean;
+}
+
 export interface ResolvedSettings {
   brand: BrandSettings;
   contact: ContactSettings;
@@ -85,6 +105,8 @@ export interface ResolvedSettings {
   badges: string[];
   /** Delivery charges by zone (inside / outside Dhaka). */
   delivery: DeliverySettings;
+  /** Checkout payment methods. */
+  payments: PaymentSettings;
 }
 
 export type PartialSettings = {
@@ -95,6 +117,14 @@ export type PartialSettings = {
   menu?: MenuItem[];
   badges?: string[];
   delivery?: Partial<DeliverySettings>;
+  payments?: {
+    cashOnDelivery?: boolean;
+    bkash?: Partial<WalletMethod>;
+    nagad?: Partial<WalletMethod>;
+    rocket?: Partial<WalletMethod>;
+    bank?: { enabled?: boolean; details?: string };
+    card?: boolean;
+  };
 };
 
 export const DEFAULT_BADGES = ["Bestseller", "Popular", "New", "Hot", "Sale", "Limited"];
@@ -123,10 +153,29 @@ export const DEFAULT_SETTINGS: ResolvedSettings = {
   menu: [],
   badges: DEFAULT_BADGES,
   delivery: { insideDhaka: 60, outsideDhaka: 120 },
+  payments: {
+    cashOnDelivery: true,
+    bkash: { enabled: true, number: "" },
+    nagad: { enabled: true, number: "" },
+    rocket: { enabled: false, number: "" },
+    bank: { enabled: false, details: "" },
+    card: true,
+  },
 };
 
 const str = (v: unknown, fallback: string): string =>
   typeof v === "string" && v.trim() ? v : fallback;
+
+const bool = (v: unknown, fallback: boolean): boolean =>
+  typeof v === "boolean" ? v : fallback;
+
+/** Merge one wallet method; an empty string number is a valid "not set" override. */
+function mergeWallet(p: Partial<WalletMethod> | undefined, d: WalletMethod): WalletMethod {
+  return {
+    enabled: bool(p?.enabled, d.enabled),
+    number: typeof p?.number === "string" ? p.number : d.number,
+  };
+}
 
 /** Layer a partial override blob over the code defaults into a full settings object. */
 export function mergeSettings(p: PartialSettings | null | undefined): ResolvedSettings {
@@ -184,6 +233,20 @@ export function mergeSettings(p: PartialSettings | null | undefined): ResolvedSe
     delivery: {
       insideDhaka: Math.max(0, Number(p.delivery?.insideDhaka ?? d.delivery.insideDhaka) || 0),
       outsideDhaka: Math.max(0, Number(p.delivery?.outsideDhaka ?? d.delivery.outsideDhaka) || 0),
+    },
+    payments: {
+      cashOnDelivery: bool(p.payments?.cashOnDelivery, d.payments.cashOnDelivery),
+      bkash: mergeWallet(p.payments?.bkash, d.payments.bkash),
+      nagad: mergeWallet(p.payments?.nagad, d.payments.nagad),
+      rocket: mergeWallet(p.payments?.rocket, d.payments.rocket),
+      bank: {
+        enabled: bool(p.payments?.bank?.enabled, d.payments.bank.enabled),
+        details:
+          typeof p.payments?.bank?.details === "string"
+            ? p.payments.bank.details
+            : d.payments.bank.details,
+      },
+      card: bool(p.payments?.card, d.payments.card),
     },
   };
 }

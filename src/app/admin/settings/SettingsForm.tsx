@@ -64,6 +64,22 @@ export function SettingsForm({ initial }: { initial: ResolvedSettings }) {
     setS((p) => ({ ...p, hero: { ...p.hero, [k]: v } }));
   const setDelivery = (k: keyof ResolvedSettings["delivery"], v: string) =>
     setS((p) => ({ ...p, delivery: { ...p.delivery, [k]: Number(v) || 0 } }));
+  const setPayFlag = (k: "cashOnDelivery" | "card", v: boolean) =>
+    setS((p) => ({ ...p, payments: { ...p.payments, [k]: v } }));
+  const setWallet = (
+    k: "bkash" | "nagad" | "rocket",
+    field: "enabled" | "number",
+    v: boolean | string
+  ) =>
+    setS((p) => ({
+      ...p,
+      payments: { ...p.payments, [k]: { ...p.payments[k], [field]: v } },
+    }));
+  const setBank = (field: "enabled" | "details", v: boolean | string) =>
+    setS((p) => ({
+      ...p,
+      payments: { ...p.payments, bank: { ...p.payments.bank, [field]: v } },
+    }));
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -304,6 +320,107 @@ export function SettingsForm({ initial }: { initial: ResolvedSettings }) {
           </Field>
         </div>
       </FormSection>
+
+      {/* Payment methods */}
+      <FormSection
+        title="Payment methods"
+        description="Choose how customers can pay at checkout. For bKash / Nagad / Rocket, enter the number they should Send Money to — it is shown to them on the payment step."
+      >
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-onyx-100 p-3">
+            <Toggle
+              checked={s.payments.cashOnDelivery}
+              onChange={(v) => setPayFlag("cashOnDelivery", v)}
+              label="Cash on Delivery"
+              description="Pay in cash when the order arrives"
+            />
+          </div>
+
+          <WalletField
+            name="bKash"
+            wallet={s.payments.bkash}
+            onToggle={(v) => setWallet("bkash", "enabled", v)}
+            onNumber={(v) => setWallet("bkash", "number", v)}
+          />
+          <WalletField
+            name="Nagad"
+            wallet={s.payments.nagad}
+            onToggle={(v) => setWallet("nagad", "enabled", v)}
+            onNumber={(v) => setWallet("nagad", "number", v)}
+          />
+          <WalletField
+            name="Rocket"
+            wallet={s.payments.rocket}
+            onToggle={(v) => setWallet("rocket", "enabled", v)}
+            onNumber={(v) => setWallet("rocket", "number", v)}
+          />
+
+          <div className="space-y-3 rounded-2xl border border-onyx-100 p-3">
+            <Toggle
+              checked={s.payments.bank.enabled}
+              onChange={(v) => setBank("enabled", v)}
+              label="Bank transfer"
+              description="Show your bank account details at checkout"
+            />
+            {s.payments.bank.enabled && (
+              <Field label="Bank account details" htmlFor="bankDetails">
+                <textarea
+                  id="bankDetails"
+                  value={s.payments.bank.details}
+                  onChange={(e) => setBank("details", e.target.value)}
+                  placeholder="Bank name • Account name • Account number • Branch / routing"
+                  rows={3}
+                  className={fieldArea}
+                />
+              </Field>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-onyx-100 p-3">
+            <Toggle
+              checked={s.payments.card}
+              onChange={(v) => setPayFlag("card", v)}
+              label="Card (demo)"
+              description="Demo card form — no real charge is taken"
+            />
+          </div>
+        </div>
+      </FormSection>
     </form>
+  );
+}
+
+function WalletField({
+  name,
+  wallet,
+  onToggle,
+  onNumber,
+}: {
+  name: string;
+  wallet: { enabled: boolean; number: string };
+  onToggle: (v: boolean) => void;
+  onNumber: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-2xl border border-onyx-100 p-3">
+      <Toggle
+        checked={wallet.enabled}
+        onChange={onToggle}
+        label={name}
+        description={`Customer sends money via ${name}`}
+      />
+      {wallet.enabled && (
+        <Field label={`${name} number (Send Money to)`} htmlFor={`pay-${name}`}>
+          <input
+            id={`pay-${name}`}
+            inputMode="tel"
+            value={wallet.number}
+            onChange={(e) => onNumber(e.target.value)}
+            placeholder="01XXXXXXXXX"
+            className={fieldInput}
+          />
+        </Field>
+      )}
+    </div>
   );
 }

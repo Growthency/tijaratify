@@ -7,11 +7,16 @@ import {
   Lock,
   MapPin,
   User,
+  Wallet,
+  Banknote,
+  Smartphone,
+  Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCart, cartSubtotal, cartHasPaidDelivery, cartPromoDiscount } from "@/lib/store/cart";
 import { useSettings } from "@/components/providers/SettingsProvider";
 import { cn, formatPrice } from "@/lib/utils";
+import type { PaymentSettings } from "@/lib/settings";
 import type { PlacedOrder } from "./OrderConfirmation";
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -34,6 +39,9 @@ interface Fields {
   card: string;
   exp: string;
   cvc: string;
+  /** Mobile-wallet / bank fields (used per selected payment method). */
+  payNumber: string;
+  trxId: string;
 }
 
 const EMPTY: Fields = {
@@ -48,9 +56,33 @@ const EMPTY: Fields = {
   card: "",
   exp: "",
   cvc: "",
+  payNumber: "",
+  trxId: "",
 };
 
 type Errors = Partial<Record<keyof Fields, string>>;
+
+/** Payment methods the customer can pick from at checkout. */
+type PaymentKey = "cod" | "bkash" | "nagad" | "rocket" | "bank" | "card";
+
+const METHOD_LABEL: Record<PaymentKey, string> = {
+  cod: "Cash on Delivery",
+  bkash: "bKash",
+  nagad: "Nagad",
+  rocket: "Rocket",
+  bank: "Bank Transfer",
+  card: "Card",
+};
+
+/** The first enabled method, used as the default selection. */
+function firstMethod(p: PaymentSettings): PaymentKey {
+  if (p.cashOnDelivery) return "cod";
+  if (p.bkash.enabled) return "bkash";
+  if (p.nagad.enabled) return "nagad";
+  if (p.rocket.enabled) return "rocket";
+  if (p.bank.enabled) return "bank";
+  return "card";
+}
 
 export function CheckoutForm({
   onPlaced,
@@ -58,7 +90,7 @@ export function CheckoutForm({
   onPlaced?: (info: PlacedOrder) => void;
 }) {
   const { items, clear, promoCode, deliveryZone } = useCart();
-  const { delivery: rates } = useSettings();
+  const { delivery: rates, payments } = useSettings();
   const subtotal = cartSubtotal(items);
   const currency = items[0]?.currency ?? "BDT";
 
@@ -78,6 +110,36 @@ export function CheckoutForm({
   const [orderNo] = useState(
     () => `JC-${Math.floor(100000 + Math.random() * 900000)}`
   );
+  const [method, setMethod] = useState<PaymentKey>(() => firstMethod(payments));
+
+  const isWallet = method === "bkash" || method === "nagad" || method === "rocket";
+  const selectedWallet =
+    method === "bkash"
+      ? payments.bkash
+      : method === "nagad"
+        ? payments.nagad
+        : method === "rocket"
+          ? payments.rocket
+          : null;
+
+  const methodOptions: {
+    key: PaymentKey;
+    label: string;
+    hint: string;
+    icon: React.ReactNode;
+  }[] = [];
+  if (payments.cashOnDelivery)
+    methodOptions.push({ key: "cod", label: "Cash on Delivery", hint: "Pay when it arrives", icon: <Banknote className="h-4 w-4" /> });
+  if (payments.bkash.enabled)
+    methodOptions.push({ key: "bkash", label: "bKash", hint: "Send Money", icon: <Smartphone className="h-4 w-4" /> });
+  if (payments.nagad.enabled)
+    methodOptions.push({ key: "nagad", label: "Nagad", hint: "Send Money", icon: <Smartphone className="h-4 w-4" /> });
+  if (payments.rocket.enabled)
+    methodOptions.push({ key: "rocket", label: "Rocket", hint: "Send Money", icon: <Smartphone className="h-4 w-4" /> });
+  if (payments.bank.enabled)
+    methodOptions.push({ key: "bank", label: "Bank Transfer", hint: "Direct deposit", icon: <Landmark className="h-4 w-4" /> });
+  if (payments.card)
+    methodOptions.push({ key: "card", label: "Card", hint: "Demo checkout", icon: <CreditCard className="h-4 w-4" /> });
 
   const set =
     (key: keyof Fields) =>
@@ -102,10 +164,23 @@ export function CheckoutForm({
     if (!values.region.trim()) next.region = "Required";
     if (!values.postcode.trim()) next.postcode = "Required";
     if (!values.country.trim()) next.country = "Required";
-    if (values.card.replace(/\s/g, "").length < 15)
-      next.card = "Enter a 16-digit card number";
-    if (!/^\d{2}\s?\/\s?\d{2}$/.test(values.exp)) next.exp = "MM / YY";
-    if (values.cvc.length < 3) next.cvc = "3–4 digits";
+
+    // Payment fields depend on the chosen method.
+    if (method === "card") {
+      if (values.card.replace(/\s/g, "").length < 15)
+        next.card = "Enter a 16-digit card number";
+      if (!/^\d{2}\s?\/\s?\d{2}$/.test(values.exp)) next.exp = "MM / YY";
+      if (values.cvc.length < 3) next.cvc = "3–4 digits";
+    } else if (isWallet) {
+      if (values.payNumber.replace(/\D/g, "").length < 11)
+        next.payNumber = "Enter the number you paid from";
+      if (values.trxId.trim().length < 4)
+        next.trxId = "Enter the Transaction ID";
+    } else if (method === "bank") {
+      if (values.trxId.trim().length < 3)
+        next.trxId = "Enter your transfer reference";
+    }
+    // Cash on Delivery needs nothing extra.
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -120,7 +195,15 @@ export function CheckoutForm({
     }
     setStatus("processing");
 
-    // Save the order (no card details are sent or stored).
+    // Build a short payment reference to store alongside the order (no card
+    // details are ever sent or stored).
+    let paymentNote = "";
+    if (method === "cod") paymentNote = "Cash on delivery — collect on arrival.";
+    else if (isWallet)
+      paymentNote = `${METHOD_LABEL[method]} · Sender: ${values.payNumber} · TrxID: ${values.trxId}`;
+    else if (method === "bank")
+      paymentNote = `Bank transfer · Ref: ${values.trxId}`;
+
     const payload = {
       customerName: values.name,
       customerEmail: values.email,
@@ -137,7 +220,8 @@ export function CheckoutForm({
       total,
       currency,
       promoCode,
-      paymentMethod: "card",
+      paymentMethod: METHOD_LABEL[method],
+      notes: paymentNote,
       items: items.map((i) => ({
         productId: i.productId,
         slug: i.slug,
@@ -286,45 +370,167 @@ export function CheckoutForm({
       {/* Payment */}
       <Fieldset
         step={3}
-        icon={<CreditCard className="h-4 w-4" />}
+        icon={<Wallet className="h-4 w-4" />}
         title="Payment"
-        hint="Demo only — no card is charged."
+        hint="Choose how you'd like to pay."
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Card number"
-            className="sm:col-span-2"
-            value={values.card}
-            onChange={set("card")}
-            error={errors.card}
-            inputMode="numeric"
-            autoComplete="cc-number"
-            placeholder="4242 4242 4242 4242"
-            adornment={<CreditCard className="h-4 w-4 text-onyx-400" />}
-          />
-          <Field
-            label="Expiry"
-            value={values.exp}
-            onChange={set("exp")}
-            error={errors.exp}
-            inputMode="numeric"
-            autoComplete="cc-exp"
-            placeholder="MM / YY"
-          />
-          <Field
-            label="CVC"
-            value={values.cvc}
-            onChange={set("cvc")}
-            error={errors.cvc}
-            inputMode="numeric"
-            autoComplete="cc-csc"
-            placeholder="123"
-          />
+        {/* Method selector */}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          {methodOptions.map((m) => {
+            const active = method === m.key;
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => {
+                  setMethod(m.key);
+                  setErrors({});
+                }}
+                aria-pressed={active}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-2xl border px-3 py-3 text-left transition-colors",
+                  active
+                    ? "border-ember-500 bg-ember-50 ring-1 ring-ember-500"
+                    : "border-onyx-200 hover:border-onyx-300"
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors",
+                    active ? "bg-ember-500 text-white" : "bg-onyx-100 text-onyx-500"
+                  )}
+                >
+                  {m.icon}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold text-onyx-950">
+                    {m.label}
+                  </span>
+                  <span className="block truncate text-[11px] text-onyx-400">
+                    {m.hint}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
-        <p className="mt-4 flex items-center gap-2 text-xs text-onyx-400">
-          <Lock className="h-3.5 w-3.5" />
-          Secured with 256-bit encryption. This is a demo storefront — use any test details.
-        </p>
+
+        {/* Method-specific panel */}
+        <div className="mt-5">
+          {method === "cod" && (
+            <p className="flex items-start gap-2.5 rounded-2xl bg-onyx-50 p-4 text-sm text-onyx-600 ring-1 ring-onyx-100">
+              <Banknote className="mt-0.5 h-4 w-4 shrink-0 text-ember-600" />
+              Pay in cash when your order arrives. We&apos;ll confirm it and start
+              making your order right away.
+            </p>
+          )}
+
+          {isWallet && (
+            <div className="space-y-4">
+              <div className="rounded-2xl bg-onyx-50 p-4 text-sm leading-relaxed text-onyx-600 ring-1 ring-onyx-100">
+                {selectedWallet?.number ? (
+                  <p>
+                    <span className="font-semibold text-onyx-950">Send Money</span> to
+                    our {METHOD_LABEL[method]} number{" "}
+                    <span className="select-all font-bold text-ember-700">
+                      {selectedWallet.number}
+                    </span>
+                    , then enter your number and the Transaction ID below.
+                  </p>
+                ) : (
+                  <p>
+                    Send Money via {METHOD_LABEL[method]}, then enter your number and
+                    the Transaction ID below. We&apos;ll share our {METHOD_LABEL[method]}{" "}
+                    number with you on WhatsApp to confirm.
+                  </p>
+                )}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label={`Your ${METHOD_LABEL[method]} number`}
+                  value={values.payNumber}
+                  onChange={set("payNumber")}
+                  error={errors.payNumber}
+                  inputMode="tel"
+                  placeholder="01XXXXXXXXX"
+                />
+                <Field
+                  label="Transaction ID (TrxID)"
+                  value={values.trxId}
+                  onChange={set("trxId")}
+                  error={errors.trxId}
+                  placeholder="e.g. 9F2K7ABCDE"
+                />
+              </div>
+            </div>
+          )}
+
+          {method === "bank" && (
+            <div className="space-y-4">
+              {payments.bank.details ? (
+                <div className="rounded-2xl bg-onyx-50 p-4 text-sm text-onyx-600 ring-1 ring-onyx-100">
+                  <p className="mb-1 font-semibold text-onyx-950">Transfer to</p>
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {payments.bank.details}
+                  </p>
+                </div>
+              ) : (
+                <p className="rounded-2xl bg-onyx-50 p-4 text-sm leading-relaxed text-onyx-600 ring-1 ring-onyx-100">
+                  Make your bank transfer, then enter the reference below. We&apos;ll
+                  share our account details with you on WhatsApp to confirm.
+                </p>
+              )}
+              <Field
+                label="Transfer reference / TrxID"
+                value={values.trxId}
+                onChange={set("trxId")}
+                error={errors.trxId}
+                placeholder="Your transfer reference"
+              />
+            </div>
+          )}
+
+          {method === "card" && (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Card number"
+                  className="sm:col-span-2"
+                  value={values.card}
+                  onChange={set("card")}
+                  error={errors.card}
+                  inputMode="numeric"
+                  autoComplete="cc-number"
+                  placeholder="4242 4242 4242 4242"
+                  adornment={<CreditCard className="h-4 w-4 text-onyx-400" />}
+                />
+                <Field
+                  label="Expiry"
+                  value={values.exp}
+                  onChange={set("exp")}
+                  error={errors.exp}
+                  inputMode="numeric"
+                  autoComplete="cc-exp"
+                  placeholder="MM / YY"
+                />
+                <Field
+                  label="CVC"
+                  value={values.cvc}
+                  onChange={set("cvc")}
+                  error={errors.cvc}
+                  inputMode="numeric"
+                  autoComplete="cc-csc"
+                  placeholder="123"
+                />
+              </div>
+              <p className="flex items-center gap-2 text-xs text-onyx-400">
+                <Lock className="h-3.5 w-3.5" />
+                Secured with 256-bit encryption. This is a demo card — no real charge
+                is taken.
+              </p>
+            </div>
+          )}
+        </div>
       </Fieldset>
 
       <button
@@ -337,6 +543,8 @@ export function CheckoutForm({
             <Loader2 className="h-5 w-5 animate-spin" />
             Processing…
           </>
+        ) : method === "cod" ? (
+          <>Place order · {formatPrice(total, currency)}</>
         ) : (
           <>
             <Lock className="h-4 w-4" />
