@@ -1,27 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { motion } from "framer-motion";
 import {
-  CheckCircle2,
   CreditCard,
   Loader2,
   Lock,
   MapPin,
-  Package,
   User,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCart, cartSubtotal, cartHasPaidDelivery, cartPromoDiscount } from "@/lib/store/cart";
 import { useSettings } from "@/components/providers/SettingsProvider";
 import { cn, formatPrice } from "@/lib/utils";
+import type { PlacedOrder } from "./OrderConfirmation";
 
 /* ──────────────────────────────────────────────────────────────────────────
    Jolchap — Demo checkout
    Contact + shipping + (demo) payment with inline validation. On submit it
-   simulates processing and shows a polished order-confirmation state, then
-   clears the cart. No real payment is taken.
+   saves the order, then hands it up to the cart page (via onPlaced) which swaps
+   the view for the order-success screen and empties the bag. No real payment
+   is taken.
    ────────────────────────────────────────────────────────────────────────── */
 
 interface Fields {
@@ -54,7 +52,11 @@ const EMPTY: Fields = {
 
 type Errors = Partial<Record<keyof Fields, string>>;
 
-export function CheckoutForm() {
+export function CheckoutForm({
+  onPlaced,
+}: {
+  onPlaced?: (info: PlacedOrder) => void;
+}) {
   const { items, clear, promoCode, deliveryZone } = useCart();
   const { delivery: rates } = useSettings();
   const subtotal = cartSubtotal(items);
@@ -70,14 +72,12 @@ export function CheckoutForm() {
 
   const [values, setValues] = useState<Fields>(EMPTY);
   const [errors, setErrors] = useState<Errors>({});
-  const [status, setStatus] = useState<"idle" | "processing" | "done">("idle");
-  // Fallback number shown if the order can't be saved; replaced by the real
-  // stored number when the API responds.
-  const [orderNo, setOrderNo] = useState(
+  const [status, setStatus] = useState<"idle" | "processing">("idle");
+  // Fallback reference used if the order can't be saved server-side; the real
+  // stored number replaces it when the API responds.
+  const [orderNo] = useState(
     () => `JC-${Math.floor(100000 + Math.random() * 900000)}`
   );
-  // Snapshot the total for the confirmation screen before the cart is cleared.
-  const [confirmedTotal, setConfirmedTotal] = useState("");
 
   const set =
     (key: keyof Fields) =>
@@ -152,6 +152,7 @@ export function CheckoutForm() {
       })),
     };
 
+    let placedOrderNo = orderNo;
     try {
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -159,13 +160,21 @@ export function CheckoutForm() {
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      if (data?.orderNo) setOrderNo(data.orderNo);
+      if (data?.orderNo) placedOrderNo = data.orderNo;
     } catch {
-      // Never block the customer — show confirmation even if saving hiccuped.
+      // Never block the customer — show the success screen even if saving hiccuped.
     }
 
-    setConfirmedTotal(formatPrice(total, currency));
-    setStatus("done");
+    // Hand the finished order up to the cart page, which swaps the whole view
+    // for the success screen; then empty the bag.
+    onPlaced?.({
+      orderNo: placedOrderNo,
+      firstName,
+      email: values.email,
+      total: formatPrice(total, currency),
+      itemCount: items.reduce((n, i) => n + i.quantity, 0),
+      deliveryZone,
+    });
     clear();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -174,17 +183,6 @@ export function CheckoutForm() {
     () => values.name.trim().split(/\s+/)[0] || "there",
     [values.name]
   );
-
-  if (status === "done") {
-    return (
-      <Confirmation
-        orderNo={orderNo}
-        firstName={firstName}
-        email={values.email}
-        total={confirmedTotal || formatPrice(total, currency)}
-      />
-    );
-  }
 
   return (
     <form onSubmit={onSubmit} className="space-y-8" noValidate>
@@ -203,7 +201,7 @@ export function CheckoutForm() {
             onChange={set("name")}
             error={errors.name}
             autoComplete="name"
-            placeholder="Alex Carter"
+            placeholder="Rahim Ahmed"
           />
           <Field
             label="Email"
@@ -221,7 +219,7 @@ export function CheckoutForm() {
             onChange={set("phone")}
             error={errors.phone}
             autoComplete="tel"
-            placeholder="+1 555 000 1234"
+            placeholder="+880 1700 000000"
           />
         </div>
       </Fieldset>
@@ -230,8 +228,8 @@ export function CheckoutForm() {
       <Fieldset
         step={2}
         icon={<MapPin className="h-4 w-4" />}
-        title="Shipping address"
-        hint="Where should we send your gear?"
+        title="Delivery address"
+        hint="Where should we deliver your order?"
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -241,7 +239,7 @@ export function CheckoutForm() {
             onChange={set("address")}
             error={errors.address}
             autoComplete="address-line1"
-            placeholder="1209 Orange Street"
+            placeholder="House 12, Road 4, Dhanmondi"
           />
           <Field
             label="City"
@@ -249,15 +247,15 @@ export function CheckoutForm() {
             onChange={set("city")}
             error={errors.city}
             autoComplete="address-level2"
-            placeholder="Wilmington"
+            placeholder="Dhaka"
           />
           <Field
-            label="State / Region"
+            label="District / Area"
             value={values.region}
             onChange={set("region")}
             error={errors.region}
             autoComplete="address-level1"
-            placeholder="Delaware"
+            placeholder="Dhaka"
           />
           <Field
             label="Postcode"
@@ -265,7 +263,7 @@ export function CheckoutForm() {
             onChange={set("postcode")}
             error={errors.postcode}
             autoComplete="postal-code"
-            placeholder="19801"
+            placeholder="1209"
           />
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold uppercase tracking-widest text-onyx-400">
@@ -347,134 +345,6 @@ export function CheckoutForm() {
         )}
       </button>
     </form>
-  );
-}
-
-/* ── Confirmation ── */
-function Confirmation({
-  orderNo,
-  firstName,
-  email,
-  total,
-}: {
-  orderNo: string;
-  firstName: string;
-  email: string;
-  total: string;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-      className="overflow-hidden rounded-3xl border border-onyx-100 bg-white shadow-card"
-    >
-      <div className="relative overflow-hidden bg-onyx-950 px-6 py-12 text-center text-white sm:px-10">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-ember-500/25 blur-[90px]" />
-        <motion.div
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.15, type: "spring", stiffness: 200, damping: 14 }}
-          className="relative mx-auto grid h-20 w-20 place-items-center rounded-full bg-ember-500 shadow-glow"
-        >
-          <CheckCircle2 className="h-11 w-11 text-white" />
-        </motion.div>
-        <h2 className="relative mt-6 text-3xl font-extrabold uppercase tracking-tightest sm:text-4xl">
-          Order confirmed
-        </h2>
-        <p className="relative mx-auto mt-3 max-w-md text-white/70">
-          Thank you, {firstName} — your gear is on the way. We&apos;ve sent a confirmation
-          and tracking details to{" "}
-          <span className="font-semibold text-white">{email}</span>.
-        </p>
-      </div>
-
-      <div className="px-6 py-8 sm:px-10">
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-onyx-50 px-5 py-4 ring-1 ring-onyx-100">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-onyx-400">
-              Order number
-            </p>
-            <p className="mt-0.5 text-lg font-extrabold text-onyx-950">{orderNo}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-onyx-400">
-              Total paid
-            </p>
-            <p className="mt-0.5 text-lg font-extrabold text-onyx-950">{total}</p>
-          </div>
-        </div>
-
-        <ol className="mt-7 space-y-5">
-          <Timeline
-            icon={<CheckCircle2 className="h-4 w-4" />}
-            title="Order received"
-            copy="We've got your order and payment confirmed."
-            done
-          />
-          <Timeline
-            icon={<Package className="h-4 w-4" />}
-            title="Packing your gear"
-            copy="Picked, checked and boxed at our Wilmington warehouse."
-          />
-          <Timeline
-            icon={<MapPin className="h-4 w-4" />}
-            title="On its way"
-            copy="Tracking lands in your inbox the moment it ships — 2–5 business days."
-            last
-          />
-        </ol>
-
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href="/shop"
-            className="inline-flex flex-1 items-center justify-center rounded-full bg-onyx-950 px-6 py-3.5 text-sm font-bold text-white transition-colors hover:bg-onyx-800"
-          >
-            Continue shopping
-          </Link>
-          <Link
-            href="/"
-            className="inline-flex flex-1 items-center justify-center rounded-full border border-onyx-200 px-6 py-3.5 text-sm font-bold text-onyx-900 transition-colors hover:border-onyx-950"
-          >
-            Back to home
-          </Link>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function Timeline({
-  icon,
-  title,
-  copy,
-  done = false,
-  last = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  copy: string;
-  done?: boolean;
-  last?: boolean;
-}) {
-  return (
-    <li className="relative flex gap-4">
-      {!last && (
-        <span className="absolute left-[15px] top-9 h-[calc(100%-4px)] w-px bg-onyx-100" />
-      )}
-      <span
-        className={cn(
-          "relative grid h-8 w-8 shrink-0 place-items-center rounded-full",
-          done ? "bg-ember-500 text-white" : "bg-onyx-100 text-onyx-500"
-        )}
-      >
-        {icon}
-      </span>
-      <div className="pb-1">
-        <p className="text-sm font-bold text-onyx-950">{title}</p>
-        <p className="mt-0.5 text-sm text-onyx-500">{copy}</p>
-      </div>
-    </li>
   );
 }
 

@@ -20,6 +20,10 @@ import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Container } from "@/components/ui/Container";
 import { CheckoutForm } from "@/components/commerce/CheckoutForm";
 import {
+  OrderConfirmation,
+  type PlacedOrder,
+} from "@/components/commerce/OrderConfirmation";
+import {
   useCart,
   lineKey,
   cartSubtotal,
@@ -47,6 +51,9 @@ export default function CartClient() {
   const total = Math.max(0, subtotal + delivery - discount);
 
   const [promo, setPromo] = useState(promoCode);
+  // Once an order is placed we keep its details here so the whole cart view is
+  // replaced by the success screen — even though the bag has just been emptied.
+  const [placed, setPlaced] = useState<PlacedOrder | null>(null);
 
   const applyPromo = () => {
     const code = promo.trim();
@@ -65,6 +72,11 @@ export default function CartClient() {
     setPromo("");
     setPromoCode("");
   };
+
+  /* ── Order placed → success screen (wins over the empty-bag view) ── */
+  if (placed) {
+    return <OrderConfirmation {...placed} />;
+  }
 
   /* ── Empty state ── */
   if (items.length === 0) {
@@ -246,7 +258,7 @@ export default function CartClient() {
               <h2 className="mb-6 text-2xl font-extrabold uppercase tracking-tightest text-onyx-950">
                 Checkout
               </h2>
-              <CheckoutForm />
+              <CheckoutForm onPlaced={setPlaced} />
             </div>
           </div>
 
