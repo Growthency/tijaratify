@@ -68,6 +68,10 @@ create table if not exists public.order_items (
   created_at  timestamptz not null default now()
 );
 
+-- Payment received/verified flag (safe to run on an existing table).
+alter table public.orders
+  add column if not exists paid boolean not null default false;
+
 create index if not exists orders_created_at_idx on public.orders (created_at desc);
 create index if not exists orders_status_idx on public.orders (status);
 create index if not exists order_items_order_id_idx on public.order_items (order_id);

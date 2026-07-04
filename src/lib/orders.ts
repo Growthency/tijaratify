@@ -56,6 +56,8 @@ export interface Order {
   currency: string;
   promoCode: string;
   paymentMethod: string;
+  /** Whether payment has been received/verified (admin-confirmed). */
+  paid: boolean;
   notes: string;
   fulfilledAt: string | null;
   returnedAt: string | null;
@@ -150,6 +152,7 @@ function mapOrder(r: Record<string, unknown>): Order {
     currency: String(r.currency ?? "BDT"),
     promoCode: String(r.promo_code ?? ""),
     paymentMethod: String(r.payment_method ?? ""),
+    paid: Boolean(r.paid ?? false),
     notes: String(r.notes ?? ""),
     fulfilledAt: r.fulfilled_at ? String(r.fulfilled_at) : null,
     returnedAt: r.returned_at ? String(r.returned_at) : null,
@@ -315,6 +318,25 @@ export async function updateOrderStatus(
   const { data, error } = await db
     .from("orders")
     .update(patch)
+    .eq("id", id)
+    .select("*, items:order_items(*)")
+    .single();
+
+  if (error || !data) return null;
+  return mapOrder(data);
+}
+
+/** Mark an order as paid / unpaid (payment received and verified by the admin). */
+export async function updateOrderPaid(
+  id: string,
+  paid: boolean,
+): Promise<Order | null> {
+  if (!isSupabaseAdminConfigured()) return null;
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("orders")
+    .update({ paid, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("*, items:order_items(*)")
     .single();

@@ -8,12 +8,14 @@ import {
   Mail,
   Phone,
   MapPin,
+  Printer,
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn, formatPrice, formatDateTime } from "@/lib/utils";
 import { EmptyState } from "@/components/admin/AdminUI";
+import { useSettings } from "@/components/providers/SettingsProvider";
 import type { Order, OrderItem, OrderStatus } from "@/lib/orders";
 
 /* `@/lib/orders` is server-only, so the status list is mirrored here for the
@@ -49,6 +51,7 @@ export function OrdersTable({
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const brandName = useSettings().brand.name;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -98,6 +101,30 @@ export function OrdersTable({
         return prev.map((o) => (o.id === order.id ? updated : o));
       });
       toast.success(`Order ${order.orderNo} marked ${status}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function changePaid(order: Order, paid: boolean) {
+    if (paid === order.paid) return;
+    setBusy(order.id);
+    try {
+      const res = await fetch("/api/admin/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: order.id, paid }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Update failed");
+
+      const updated: Order = data.order;
+      setRows((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+      toast.success(
+        `Order ${order.orderNo} marked ${paid ? "paid" : "unpaid"}`,
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Update failed");
     } finally {
@@ -171,8 +198,10 @@ export function OrdersTable({
                   count={count}
                   view={view}
                   busy={busy === o.id}
+                  brandName={brandName}
                   onToggle={() => toggle(o.id)}
                   onStatus={(s) => changeStatus(o, s)}
+                  onPaid={(p) => changePaid(o, p)}
                 />
               );
             })}
@@ -194,8 +223,10 @@ export function OrdersTable({
             open={expanded.has(o.id)}
             view={view}
             busy={busy === o.id}
+            brandName={brandName}
             onToggle={() => toggle(o.id)}
             onStatus={(s) => changeStatus(o, s)}
+            onPaid={(p) => changePaid(o, p)}
           />
         ))}
         {filtered.length === 0 && (
@@ -215,16 +246,20 @@ function FragmentRow({
   count,
   view,
   busy,
+  brandName,
   onToggle,
   onStatus,
+  onPaid,
 }: {
   order: Order;
   open: boolean;
   count: number;
   view: View;
   busy: boolean;
+  brandName: string;
   onToggle: () => void;
   onStatus: (s: OrderStatus) => void;
+  onPaid: (paid: boolean) => void;
 }) {
   return (
     <>
@@ -246,8 +281,13 @@ function FragmentRow({
             {count} item{count === 1 ? "" : "s"}
           </span>
         </td>
-        <td className="px-3 py-3.5 font-bold text-onyx-900">
-          {formatPrice(o.total, o.currency)}
+        <td className="px-3 py-3.5">
+          <p className="font-bold text-onyx-900">
+            {formatPrice(o.total, o.currency)}
+          </p>
+          <div className="mt-1">
+            <PaidBadge paid={o.paid} />
+          </div>
         </td>
         <td className="px-3 py-3.5">
           <StatusControl order={o} busy={busy} onStatus={onStatus} />
@@ -278,7 +318,12 @@ function FragmentRow({
       {open && (
         <tr>
           <td colSpan={6} className="bg-onyx-50/40 px-5 py-5">
-            <OrderDetail order={o} />
+            <OrderDetail
+              order={o}
+              busy={busy}
+              brandName={brandName}
+              onPaid={onPaid}
+            />
           </td>
         </tr>
       )}
@@ -292,15 +337,19 @@ function MobileCard({
   open,
   view,
   busy,
+  brandName,
   onToggle,
   onStatus,
+  onPaid,
 }: {
   order: Order;
   open: boolean;
   view: View;
   busy: boolean;
+  brandName: string;
   onToggle: () => void;
   onStatus: (s: OrderStatus) => void;
+  onPaid: (paid: boolean) => void;
 }) {
   const count = o.items.reduce((s, i) => s + i.quantity, 0);
   return (
@@ -316,13 +365,16 @@ function MobileCard({
           </p>
           <p className="text-xs text-onyx-500">{o.customerPhone}</p>
         </div>
-        <div className="text-right">
+        <div className="flex flex-col items-end text-right">
           <p className="font-bold text-onyx-900">
             {formatPrice(o.total, o.currency)}
           </p>
           <p className="mt-0.5 text-xs text-onyx-400">
             {count} item{count === 1 ? "" : "s"}
           </p>
+          <div className="mt-1.5">
+            <PaidBadge paid={o.paid} />
+          </div>
         </div>
       </div>
       <div className="flex items-center justify-between gap-2 border-t border-onyx-50 px-4 py-3">
@@ -340,7 +392,12 @@ function MobileCard({
       </div>
       {open && (
         <div className="border-t border-onyx-50 bg-onyx-50/40 p-4">
-          <OrderDetail order={o} />
+          <OrderDetail
+            order={o}
+            busy={busy}
+            brandName={brandName}
+            onPaid={onPaid}
+          />
         </div>
       )}
     </div>
@@ -390,7 +447,17 @@ function StatusControl({
 }
 
 /* ── Expanded detail: items + shipping + totals ── */
-function OrderDetail({ order: o }: { order: Order }) {
+function OrderDetail({
+  order: o,
+  busy,
+  brandName,
+  onPaid,
+}: {
+  order: Order;
+  busy: boolean;
+  brandName: string;
+  onPaid: (paid: boolean) => void;
+}) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
       {/* Items */}
@@ -450,9 +517,32 @@ function OrderDetail({ order: o }: { order: Order }) {
             </span>
           </p>
           <p className="mt-1.5 text-xs text-onyx-400">
-            Delivery zone: {o.deliveryZone === "outside" ? "Outside Dhaka" : "Inside Dhaka"}
-            {" · "}Payment: {o.paymentMethod || "—"}
+            Delivery zone:{" "}
+            {o.deliveryZone === "outside" ? "Outside Dhaka" : "Inside Dhaka"}
           </p>
+        </div>
+        <div>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-onyx-400">
+            Payment
+          </p>
+          <p className="font-semibold text-onyx-900">{o.paymentMethod || "—"}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <PaidBadge paid={o.paid} />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onPaid(!o.paid)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-50",
+                o.paid
+                  ? "border-onyx-200 text-onyx-600 hover:border-onyx-300"
+                  : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+              )}
+            >
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              {o.paid ? "Mark as unpaid" : "Mark as paid"}
+            </button>
+          </div>
         </div>
         {o.returnReason && (
           <div>
@@ -470,6 +560,16 @@ function OrderDetail({ order: o }: { order: Order }) {
             <p className="text-onyx-600">{o.notes}</p>
           </div>
         )}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => printSlip(o, brandName)}
+            className="inline-flex items-center gap-2 rounded-lg border border-onyx-200 bg-white px-3.5 py-2 text-xs font-bold text-onyx-800 shadow-sm transition-colors hover:border-ember-300 hover:text-ember-600"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Print / download delivery slip
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -508,4 +608,144 @@ function Line({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-onyx-800">{value}</span>
     </div>
   );
+}
+
+/* ── Paid / Unpaid pill ── */
+function PaidBadge({ paid }: { paid: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset",
+        paid
+          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+          : "bg-amber-50 text-amber-700 ring-amber-200",
+      )}
+    >
+      {paid ? "Paid" : "Unpaid"}
+    </span>
+  );
+}
+
+/* Escape user-supplied text before it goes into the printable slip markup. */
+function esc(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Open a clean, printable delivery slip in a new window (Print → Save as PDF to
+ * download). It carries everything the delivery person needs: who to deliver to,
+ * the address & phone, the items, and — crucially — whether to collect cash
+ * (Cash on Delivery) or not (already paid online).
+ */
+function printSlip(o: Order, brandName: string) {
+  const isCOD = /cash on delivery/i.test(o.paymentMethod);
+  const address =
+    [o.address, o.city, o.region, o.postcode, o.country]
+      .filter(Boolean)
+      .join(", ") || "—";
+  const zone = o.deliveryZone === "outside" ? "Outside Dhaka" : "Inside Dhaka";
+  const date = formatDateTime(o.createdAt);
+
+  const itemRows = o.items
+    .map((i) => {
+      const variant = [i.size, i.color].filter(Boolean).join(" · ");
+      return `<tr>
+        <td class="q">${i.quantity}×</td>
+        <td class="n">${esc(i.name)}${variant ? `<span>${esc(variant)}</span>` : ""}</td>
+        <td class="p">${esc(formatPrice(i.lineTotal, i.currency))}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const discountRow =
+    o.discount > 0
+      ? `<div class="row"><span>Discount${o.promoCode ? ` (${esc(o.promoCode)})` : ""}</span><span>− ${esc(formatPrice(o.discount, o.currency))}</span></div>`
+      : "";
+
+  const collect = isCOD
+    ? `<div class="collect cod"><span class="lbl">Collect on delivery (Cash)</span><span class="amt">${esc(formatPrice(o.total, o.currency))}</span></div>`
+    : `<div class="collect prepaid"><span class="lbl">Paid online — ${esc(o.paymentMethod || "Prepaid")}</span><span class="amt">${o.paid ? "PAID" : "Do not collect cash"}</span></div>`;
+
+  const notes = o.notes ? `<div class="notes"><b>Notes:</b> ${esc(o.notes)}</div>` : "";
+
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8" />
+<title>Delivery slip ${esc(o.orderNo)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #0c141b; }
+  .slip { max-width: 420px; margin: 0 auto; }
+  .head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #0c141b; padding-bottom: 10px; }
+  .brand { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .doc { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #6b7280; }
+  .meta { display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #6b7280; }
+  .meta b { color: #0c141b; }
+  .to { margin-top: 14px; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+  .to .lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #6b7280; }
+  .to .name { font-size: 17px; font-weight: 800; margin-top: 3px; }
+  .to .phone { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  .to .addr { font-size: 13px; margin-top: 4px; line-height: 1.4; }
+  .to .zone { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #6b7280; border-bottom: 1px solid #e5e7eb; padding: 0 0 6px; }
+  td { padding: 6px 0; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
+  td.q { width: 34px; font-weight: 700; }
+  td.n span { display: block; font-size: 11px; color: #6b7280; }
+  td.p { text-align: right; white-space: nowrap; font-weight: 600; }
+  .totals { margin-top: 10px; font-size: 13px; }
+  .row { display: flex; justify-content: space-between; padding: 2px 0; color: #4b5563; }
+  .grand { display: flex; justify-content: space-between; padding: 8px 0 0; margin-top: 6px; border-top: 1px solid #0c141b; font-size: 16px; font-weight: 800; }
+  .collect { margin-top: 14px; border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; }
+  .collect .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .collect .amt { font-size: 18px; font-weight: 800; }
+  .collect.cod { background: #fef3c7; color: #92400e; }
+  .collect.prepaid { background: #ecfdf5; color: #065f46; }
+  .notes { margin-top: 12px; font-size: 12px; color: #4b5563; line-height: 1.4; }
+  .foot { margin-top: 18px; text-align: center; font-size: 11px; color: #9ca3af; }
+  @media print { body { padding: 0; } .slip { max-width: none; } }
+</style></head>
+<body onload="window.focus();window.print();">
+  <div class="slip">
+    <div class="head">
+      <div class="brand">${esc(brandName)}</div>
+      <div class="doc">Delivery Slip</div>
+    </div>
+    <div class="meta">
+      <span>Order <b>${esc(o.orderNo)}</b></span>
+      <span>${esc(date)}</span>
+    </div>
+    <div class="to">
+      <div class="lbl">Deliver to</div>
+      <div class="name">${esc(o.customerName || "—")}</div>
+      <div class="phone">${esc(o.customerPhone || "—")}</div>
+      <div class="addr">${esc(address)}</div>
+      <div class="zone">${esc(zone)}</div>
+    </div>
+    <table>
+      <thead><tr><th>Qty</th><th>Item</th><th style="text-align:right">Price</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="totals">
+      <div class="row"><span>Subtotal</span><span>${esc(formatPrice(o.subtotal, o.currency))}</span></div>
+      <div class="row"><span>Delivery</span><span>${esc(formatPrice(o.delivery, o.currency))}</span></div>
+      ${discountRow}
+      <div class="grand"><span>Total</span><span>${esc(formatPrice(o.total, o.currency))}</span></div>
+    </div>
+    ${collect}
+    ${notes}
+    <div class="foot">Thank you — ${esc(brandName)}</div>
+  </div>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=480,height=720");
+  if (!w) {
+    toast.error("Allow pop-ups to print the delivery slip.");
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
 }
