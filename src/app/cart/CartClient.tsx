@@ -330,6 +330,32 @@ export default function CartClient() {
 
               <div className="my-5 hairline" />
 
+              {/* Itemised products — each name with its own line price */}
+              <ul className="space-y-2.5 text-sm">
+                {items.map((item) => (
+                  <li
+                    key={lineKey(item)}
+                    className="flex items-start justify-between gap-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block line-clamp-1 text-onyx-700">
+                        {item.name}
+                      </span>
+                      {item.quantity > 1 && (
+                        <span className="block text-xs text-onyx-400">
+                          {formatPrice(item.price, item.currency)} × {item.quantity}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums text-onyx-950">
+                      {formatPrice(item.price * item.quantity, item.currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="my-4 hairline" />
+
               <dl className="space-y-3 text-sm">
                 <Row label="Subtotal">{formatPrice(subtotal, currency)}</Row>
                 <Row label="Delivery">
