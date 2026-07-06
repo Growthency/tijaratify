@@ -520,6 +520,17 @@ function OrderDetail({
             Delivery zone:{" "}
             {o.deliveryZone === "outside" ? "Outside Dhaka" : "Inside Dhaka"}
           </p>
+          {o.mapLink && (
+            <a
+              href={o.mapLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-ember-50 px-2.5 py-1.5 text-xs font-bold text-ember-700 transition-colors hover:bg-ember-100"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              Open pinned location in Maps
+            </a>
+          )}
         </div>
         <div>
           <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-onyx-400">
@@ -690,6 +701,7 @@ function printSlip(o: Order, brandName: string) {
   .to .phone { font-size: 15px; font-weight: 700; margin-top: 2px; }
   .to .addr { font-size: 13px; margin-top: 4px; line-height: 1.4; }
   .to .zone { font-size: 11px; color: #6b7280; margin-top: 4px; }
+  .to .maplink { display: inline-block; margin-top: 7px; font-size: 11px; font-weight: 700; color: #b45309; text-decoration: none; }
   table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
   th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #6b7280; border-bottom: 1px solid #e5e7eb; padding: 0 0 6px; }
   td { padding: 6px 0; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
@@ -724,6 +736,7 @@ function printSlip(o: Order, brandName: string) {
       <div class="phone">${esc(o.customerPhone || "—")}</div>
       <div class="addr">${esc(address)}</div>
       <div class="zone">${esc(zone)}</div>
+      ${o.mapLink ? `<a class="maplink" href="${esc(o.mapLink)}">Open exact location on Google Maps →</a>` : ""}
     </div>
     <table>
       <thead><tr><th>Qty</th><th>Item</th><th style="text-align:right">Price</th></tr></thead>

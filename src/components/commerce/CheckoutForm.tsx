@@ -11,6 +11,8 @@ import {
   Banknote,
   Smartphone,
   Landmark,
+  LocateFixed,
+  MapPinned,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCart, cartSubtotal, cartHasPaidDelivery, cartPromoDiscount } from "@/lib/store/cart";
@@ -111,6 +113,11 @@ export function CheckoutForm({
     () => `JC-${Math.floor(100000 + Math.random() * 900000)}`
   );
   const [method, setMethod] = useState<PaymentKey>(() => firstMethod(payments));
+  // Exact GPS drop-pin (via "use my location"), saved with the order so the
+  // courier can navigate to the precise spot.
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapLink, setMapLink] = useState("");
+  const [locating, setLocating] = useState(false);
 
   const isWallet = method === "bkash" || method === "nagad" || method === "rocket";
   const selectedWallet =
@@ -151,6 +158,52 @@ export function CheckoutForm({
       setValues((s) => ({ ...s, [key]: v }));
       if (errors[key]) setErrors((er) => ({ ...er, [key]: undefined }));
     };
+
+  /** Turn on the device location, drop an exact pin, and prefill the area. */
+  const pinLocation = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      toast.error("Location isn't available on this device.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        setCoords({ lat, lng });
+        setMapLink(`https://www.google.com/maps?q=${lat},${lng}`);
+        // Best-effort reverse geocode (free, no key) to prefill city / area.
+        try {
+          const res = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+          );
+          const g = await res.json();
+          setValues((s) => ({
+            ...s,
+            city: s.city.trim() || g.city || g.locality || s.city,
+            region:
+              s.region.trim() ||
+              g.locality ||
+              g.principalSubdivision ||
+              s.region,
+          }));
+        } catch {
+          /* the exact pin is what matters — ignore geocode failures */
+        }
+        setLocating(false);
+        toast.success("Location pinned — thank you!");
+      },
+      (err) => {
+        setLocating(false);
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? "Allow location access to pin your exact spot, or type your address."
+            : "Couldn't get your location — please type your address.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+    );
+  };
 
   const validate = (): boolean => {
     const next: Errors = {};
@@ -213,6 +266,7 @@ export function CheckoutForm({
       region: values.region,
       postcode: values.postcode,
       country: values.country,
+      mapLink,
       deliveryZone,
       subtotal,
       delivery,
@@ -315,6 +369,62 @@ export function CheckoutForm({
         title="Delivery address"
         hint="Where should we deliver your order?"
       >
+        {/* Exact-location pin */}
+        <div className="mb-5 rounded-2xl border border-dashed border-onyx-200 bg-onyx-50/60 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <MapPinned className="mt-0.5 h-4 w-4 shrink-0 text-ember-600" />
+              <p className="text-sm text-onyx-600">
+                <span className="font-semibold text-onyx-900">
+                  Pin your exact location
+                </span>{" "}
+                — turn on location so the courier reaches you faster.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={pinLocation}
+              disabled={locating}
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-onyx-950 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-onyx-800 disabled:opacity-60"
+            >
+              {locating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LocateFixed className="h-4 w-4" />
+              )}
+              {coords ? "Update location" : "Use my location"}
+            </button>
+          </div>
+
+          {coords && (
+            <div className="mt-4">
+              <div className="overflow-hidden rounded-xl border border-onyx-100">
+                <iframe
+                  title="Your delivery location"
+                  src={`https://maps.google.com/maps?q=${coords.lat},${coords.lng}&z=16&output=embed`}
+                  className="block h-44 w-full"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600">
+                  <MapPinned className="h-3.5 w-3.5" />
+                  Exact location pinned
+                </span>
+                <a
+                  href={mapLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-ember-600 underline-offset-2 hover:underline"
+                >
+                  Open in Google Maps
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Street address"

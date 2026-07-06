@@ -48,6 +48,8 @@ export interface Order {
   region: string;
   postcode: string;
   country: string;
+  /** Google Maps link to the customer's exact pinned location (may be empty). */
+  mapLink: string;
   deliveryZone: string;
   subtotal: number;
   delivery: number;
@@ -79,6 +81,7 @@ export interface NewOrderInput {
   region: string;
   postcode: string;
   country: string;
+  mapLink: string;
   deliveryZone: string;
   subtotal: number;
   delivery: number;
@@ -144,6 +147,7 @@ function mapOrder(r: Record<string, unknown>): Order {
     region: String(r.region ?? ""),
     postcode: String(r.postcode ?? ""),
     country: String(r.country ?? ""),
+    mapLink: String(r.map_link ?? ""),
     deliveryZone: String(r.delivery_zone ?? "inside"),
     subtotal: Number(r.subtotal ?? 0),
     delivery: Number(r.delivery ?? 0),
@@ -226,33 +230,39 @@ export async function createOrder(
   const db = createAdminClient();
 
   // Insert the header, retrying a couple of times on the (rare) unique clash.
+  // `map_link` is a newer column — if it hasn't been added yet, we drop it and
+  // retry so an order is never lost just because that migration wasn't run.
   let orderId = "";
   let orderNo = "";
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let includeMapLink = Boolean(input.mapLink);
+  for (let attempt = 0; attempt < 5; attempt++) {
     orderNo = genOrderNo();
+    const row: Record<string, unknown> = {
+      order_no: orderNo,
+      status: "pending",
+      customer_name: input.customerName,
+      customer_email: input.customerEmail,
+      customer_phone: input.customerPhone,
+      address: input.address,
+      city: input.city,
+      region: input.region,
+      postcode: input.postcode,
+      country: input.country,
+      delivery_zone: input.deliveryZone,
+      subtotal: input.subtotal,
+      delivery: input.delivery,
+      discount: input.discount,
+      total: input.total,
+      currency: input.currency,
+      promo_code: input.promoCode,
+      payment_method: input.paymentMethod,
+      notes: input.notes,
+    };
+    if (includeMapLink) row.map_link = input.mapLink;
+
     const { data, error } = await db
       .from("orders")
-      .insert({
-        order_no: orderNo,
-        status: "pending",
-        customer_name: input.customerName,
-        customer_email: input.customerEmail,
-        customer_phone: input.customerPhone,
-        address: input.address,
-        city: input.city,
-        region: input.region,
-        postcode: input.postcode,
-        country: input.country,
-        delivery_zone: input.deliveryZone,
-        subtotal: input.subtotal,
-        delivery: input.delivery,
-        discount: input.discount,
-        total: input.total,
-        currency: input.currency,
-        promo_code: input.promoCode,
-        payment_method: input.paymentMethod,
-        notes: input.notes,
-      })
+      .insert(row)
       .select("id, order_no")
       .single();
 
@@ -263,6 +273,16 @@ export async function createOrder(
     }
     if (error && isMissingTable(error)) {
       return { ok: false, orderNo: null, error: "missing_table" };
+    }
+    // The map_link column doesn't exist yet → retry immediately without it.
+    if (
+      error &&
+      includeMapLink &&
+      (error.code === "42703" || /map_link/i.test(error.message ?? ""))
+    ) {
+      includeMapLink = false;
+      attempt--;
+      continue;
     }
     // 23505 = unique_violation → try another number; otherwise bail.
     if (error && error.code !== "23505") {

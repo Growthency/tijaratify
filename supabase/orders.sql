@@ -72,6 +72,10 @@ create table if not exists public.order_items (
 alter table public.orders
   add column if not exists paid boolean not null default false;
 
+-- Exact pinned delivery location (Google Maps link from "use my location").
+alter table public.orders
+  add column if not exists map_link text not null default '';
+
 create index if not exists orders_created_at_idx on public.orders (created_at desc);
 create index if not exists orders_status_idx on public.orders (status);
 create index if not exists order_items_order_id_idx on public.order_items (order_id);

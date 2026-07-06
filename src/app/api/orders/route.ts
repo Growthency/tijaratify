@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     region: str(body.region).trim(),
     postcode: str(body.postcode).trim(),
     country: str(body.country).trim() || "Bangladesh",
+    mapLink: str(body.mapLink).trim(),
     deliveryZone: str(body.deliveryZone) || "inside",
     subtotal: num(body.subtotal),
     delivery: num(body.delivery),
