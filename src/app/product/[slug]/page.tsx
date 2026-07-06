@@ -14,6 +14,7 @@ import {
   getProducts,
   getRelatedProducts,
 } from "@/lib/queries";
+import { listReviews } from "@/lib/reviews-store";
 import { siteConfig } from "@/config/site";
 import { pageMetadata, breadcrumbLd, absoluteUrl } from "@/lib/seo";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -50,7 +51,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const product = await getProduct(slug);
   if (!product) notFound();
 
-  const related = await getRelatedProducts(product, 4);
+  const [related, reviews] = await Promise.all([
+    getRelatedProducts(product, 4),
+    listReviews(product.slug),
+  ]);
 
   // Product schema for rich results.
   const productUrl = absoluteUrl(`/product/${product.slug}`);
@@ -126,7 +130,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
         <ProductTabs product={product} />
 
-        <ProductReviews product={product} />
+        <ProductReviews product={product} reviews={reviews} />
       </Container>
 
       {/* related */}

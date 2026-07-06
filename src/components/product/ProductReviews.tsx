@@ -1,12 +1,51 @@
 import { BadgeCheck, Star } from "lucide-react";
 import { Stars } from "@/components/ui/Stars";
-import { buildReviews, buildDistribution, recommendPercent } from "@/lib/reviews";
+import {
+  buildReviews,
+  buildDistribution,
+  recommendPercent,
+  initialsOf,
+  type StoredReview,
+} from "@/lib/reviews";
 import type { Product } from "@/types";
 
+interface Card {
+  key: string;
+  name: string;
+  initials: string;
+  meta: string;
+  rating: number;
+  title: string;
+  body: string;
+}
+
 /** Always-visible customer-reviews section shown beneath the product. */
-export function ProductReviews({ product }: { product: Product }) {
-  const reviews = buildReviews(product, 4);
+export function ProductReviews({
+  product,
+  reviews = [],
+}: {
+  product: Product;
+  reviews?: StoredReview[];
+}) {
   const distribution = buildDistribution(product.rating);
+
+  // Real, purchase-verified reviews first; top up with the seeded copy so a
+  // brand-new product still shows a full, credible section.
+  const real: Card[] = reviews.map((r) => ({
+    key: r.id,
+    name: r.customerName || "Verified customer",
+    initials: initialsOf(r.customerName),
+    meta: "Verified purchase",
+    rating: r.rating,
+    title: r.title,
+    body: r.body,
+  }));
+  const filler: Card[] = buildReviews(product, 4).map((s, i) => ({
+    key: `seed-${i}`,
+    ...s,
+  }));
+  const cards = [...real, ...filler].slice(0, Math.max(4, real.length));
+  const reviewCount = product.reviewCount + reviews.length;
 
   return (
     <section id="reviews" className="mt-20 scroll-mt-28">
@@ -23,7 +62,7 @@ export function ProductReviews({ product }: { product: Product }) {
         <div className="flex items-center gap-2 text-sm text-onyx-500">
           <Stars rating={product.rating} size={16} />
           <span className="font-bold text-onyx-950">{product.rating.toFixed(1)}</span>
-          <span>· {product.reviewCount} reviews</span>
+          <span>· {reviewCount} reviews</span>
         </div>
       </div>
 
@@ -40,7 +79,7 @@ export function ProductReviews({ product }: { product: Product }) {
             <Stars rating={product.rating} size={18} />
           </div>
           <p className="mt-2 text-sm text-onyx-500">
-            Based on {product.reviewCount} verified reviews
+            Based on {reviewCount} verified reviews
           </p>
 
           <div className="mt-6 space-y-2">
@@ -71,9 +110,9 @@ export function ProductReviews({ product }: { product: Product }) {
 
         {/* written reviews */}
         <div className="space-y-7">
-          {reviews.map((r) => (
+          {cards.map((r) => (
             <article
-              key={r.name + r.title}
+              key={r.key}
               className="rounded-3xl bg-white p-6 ring-1 ring-onyx-100 sm:p-7"
             >
               <div className="flex items-center justify-between gap-4">
@@ -94,8 +133,18 @@ export function ProductReviews({ product }: { product: Product }) {
                 </div>
                 <Stars rating={r.rating} size={14} />
               </div>
-              <h3 className="mt-4 text-base font-bold text-onyx-950">{r.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-onyx-600">{r.body}</p>
+              {r.title && (
+                <h3 className="mt-4 text-base font-bold text-onyx-950">{r.title}</h3>
+              )}
+              {r.body ? (
+                <p className="mt-1.5 text-sm leading-relaxed text-onyx-600">{r.body}</p>
+              ) : (
+                !r.title && (
+                  <p className="mt-4 text-sm text-onyx-500">
+                    Left a {r.rating}-star rating.
+                  </p>
+                )
+              )}
             </article>
           ))}
         </div>

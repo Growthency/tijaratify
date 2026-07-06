@@ -344,3 +344,83 @@ export async function updateOrderPaid(
   if (error || !data) return null;
   return mapOrder(data);
 }
+
+/* ── Customer-facing (guest) lookups ──────────────────────────────────────
+   There are no customer accounts. A customer proves ownership of an order with
+   the phone number they used at checkout — the same way small COD stores let
+   people "track by phone". Matching is on the last 10 digits so +8801… and 01…
+   forms both work. */
+
+const phoneCore = (s: string): string => (s || "").replace(/\D/g, "").slice(-10);
+
+/** True when two phone numbers refer to the same line (last-10-digit match). */
+export function phonesMatch(a: string, b: string): boolean {
+  const ca = phoneCore(a);
+  return ca.length >= 6 && ca === phoneCore(b);
+}
+
+/** Orders placed with a given phone number, newest first. */
+export async function findOrdersByPhone(
+  phone: string,
+): Promise<{ orders: Order[]; setup: OrdersSetup }> {
+  if (!isSupabaseAdminConfigured()) return { orders: [], setup: "unconfigured" };
+  const core = phoneCore(phone);
+  if (core.length < 6) return { orders: [], setup: "ok" };
+  try {
+    const db = createAdminClient();
+    const { data, error } = await db
+      .from("orders")
+      .select("*, items:order_items(*)")
+      .ilike("customer_phone", `%${core}%`)
+      .order("created_at", { ascending: false });
+    if (error) {
+      if (isMissingTable(error)) return { orders: [], setup: "missing" };
+      return { orders: [], setup: "ok" };
+    }
+    // Exact last-10 match (ilike is a coarse pre-filter).
+    const orders = (data ?? [])
+      .map(mapOrder)
+      .filter((o) => phonesMatch(o.customerPhone, phone));
+    return { orders, setup: "ok" };
+  } catch {
+    return { orders: [], setup: "missing" };
+  }
+}
+
+/** Fetch a single order by its human order number (with items). */
+export async function getOrderByNo(orderNo: string): Promise<Order | null> {
+  if (!isSupabaseAdminConfigured()) return null;
+  try {
+    const db = createAdminClient();
+    const { data, error } = await db
+      .from("orders")
+      .select("*, items:order_items(*)")
+      .eq("order_no", orderNo)
+      .single();
+    if (error || !data) return null;
+    return mapOrder(data);
+  } catch {
+    return null;
+  }
+}
+
+/** Statuses a customer is still allowed to cancel themselves. */
+export const CUSTOMER_CANCELLABLE: OrderStatus[] = ["pending", "processing"];
+
+/** Cancel an order on the customer's behalf, after verifying they own it. */
+export async function cancelOrderByCustomer(
+  orderNo: string,
+  phone: string,
+): Promise<{ ok: boolean; order?: Order; error?: string }> {
+  const order = await getOrderByNo(orderNo);
+  if (!order) return { ok: false, error: "not_found" };
+  if (!phonesMatch(order.customerPhone, phone)) {
+    return { ok: false, error: "phone_mismatch" };
+  }
+  if (!CUSTOMER_CANCELLABLE.includes(order.status)) {
+    return { ok: false, error: "not_cancellable" };
+  }
+  const updated = await updateOrderStatus(order.id, "cancelled");
+  if (!updated) return { ok: false, error: "update_failed" };
+  return { ok: true, order: updated };
+}

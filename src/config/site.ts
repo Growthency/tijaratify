@@ -201,7 +201,7 @@ export const footerNav: { heading: string; links: NavLink[] }[] = [
       { label: "Delivery & Shipping", href: "/shipping" },
       { label: "Returns & Refunds", href: "/returns" },
       { label: "Artwork & File Guide", href: "/size-guide" },
-      { label: "Track Your Order", href: "/contact#track" },
+      { label: "Track Your Order", href: "/orders" },
     ],
   },
   {

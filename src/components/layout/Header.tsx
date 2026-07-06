@@ -72,8 +72,8 @@ export function Header({ categories }: { categories: Category[] }) {
               <Search className="h-[19px] w-[19px]" />
             </button>
             <Link
-              href="/admin"
-              aria-label="Account / admin login"
+              href="/orders"
+              aria-label="My orders"
               className="hidden h-10 w-10 place-items-center rounded-full text-onyx-900 transition-colors hover:bg-onyx-100 sm:grid"
             >
               <User className="h-[19px] w-[19px]" />
