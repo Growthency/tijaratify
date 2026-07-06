@@ -34,6 +34,8 @@ export interface OrderItem {
   size: string | null;
   color: string | null;
   currency: string;
+  /** Return window in days — enriched at customer lookup for the return UI. */
+  returnDays?: number;
 }
 
 export interface Order {

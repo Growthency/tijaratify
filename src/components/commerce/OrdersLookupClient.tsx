@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ShoppingBag,
   CreditCard,
+  RotateCcw,
   X,
 } from "lucide-react";
 import { Container } from "@/components/ui/Container";
@@ -167,8 +168,21 @@ function OrderCard({
   const [confirming, setConfirming] = useState(false);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<Set<string>>(new Set());
+  const [returning, setReturning] = useState<string | null>(null);
   const st = STATUS[o.status];
   const count = o.items.reduce((s, i) => s + i.quantity, 0);
+  const now = Date.now();
+
+  // Whether a delivered item is still inside its product's return window.
+  const returnInfo = (item: OrderItem) => {
+    const rd = item.returnDays ?? 0;
+    const delivered = o.fulfilledAt ? new Date(o.fulfilledAt).getTime() : 0;
+    if (o.status !== "delivered" || rd <= 0 || !delivered) {
+      return { can: false, daysLeft: 0 };
+    }
+    const daysLeft = Math.ceil(rd - (now - delivered) / 86_400_000);
+    return { can: daysLeft > 0, daysLeft };
+  };
 
   async function cancel() {
     setBusy(true);
@@ -245,15 +259,10 @@ function OrderCard({
               </p>
             </div>
 
-            {/* Review (delivered only) */}
+            {/* Review + return (delivered only) */}
             {o.status === "delivered" && (
               <div className="mt-3 pl-20">
-                {reviewed.has(i.slug) ? (
-                  <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Review submitted — thank you!
-                  </p>
-                ) : reviewing === i.slug ? (
+                {reviewing === i.slug ? (
                   <ReviewForm
                     orderNo={o.orderNo}
                     phone={phone}
@@ -264,15 +273,51 @@ function OrderCard({
                     }}
                     onCancel={() => setReviewing(null)}
                   />
+                ) : returning === i.slug ? (
+                  <ReturnForm
+                    orderNo={o.orderNo}
+                    phone={phone}
+                    item={i}
+                    onDone={(updated) => {
+                      onChange(updated);
+                      setReturning(null);
+                    }}
+                    onCancel={() => setReturning(null)}
+                  />
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setReviewing(i.slug)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-onyx-200 px-3.5 py-1.5 text-xs font-bold text-onyx-700 transition-colors hover:border-ember-300 hover:text-ember-600"
-                  >
-                    <Star className="h-3.5 w-3.5" />
-                    Write a review
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {reviewed.has(i.slug) ? (
+                      <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Review submitted
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setReviewing(i.slug)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-onyx-200 px-3.5 py-1.5 text-xs font-bold text-onyx-700 transition-colors hover:border-ember-300 hover:text-ember-600"
+                      >
+                        <Star className="h-3.5 w-3.5" />
+                        Write a review
+                      </button>
+                    )}
+                    {(() => {
+                      const info = returnInfo(i);
+                      return info.can ? (
+                        <button
+                          type="button"
+                          onClick={() => setReturning(i.slug)}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-onyx-200 px-3.5 py-1.5 text-xs font-bold text-onyx-700 transition-colors hover:border-rose-300 hover:text-rose-600"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Return this item
+                          <span className="font-medium text-onyx-400">
+                            · {info.daysLeft}d left
+                          </span>
+                        </button>
+                      ) : null;
+                    })()}
+                  </div>
                 )}
               </div>
             )}
@@ -463,6 +508,114 @@ function ReviewForm({
         >
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           Submit review
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-full px-3 py-2 text-xs font-semibold text-onyx-500 hover:text-onyx-800"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/* ── Inline return request (delivered items still inside the return window) ── */
+const RETURN_REASONS = [
+  "Damaged or defective",
+  "Wrong item received",
+  "Not as described",
+  "Missing parts or accessories",
+  "Changed my mind",
+  "Other",
+];
+
+function ReturnForm({
+  orderNo,
+  phone,
+  item,
+  onDone,
+  onCancel,
+}: {
+  orderNo: string;
+  phone: string;
+  item: OrderItem;
+  onDone: (order: Order) => void;
+  onCancel: () => void;
+}) {
+  const [reasonType, setReasonType] = useState(RETURN_REASONS[0]);
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await fetch("/api/orders/return", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderNo,
+          phone,
+          productSlug: item.slug,
+          reasonType,
+          reason: details,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) {
+        toast.error(data.error || "Couldn't submit your return.");
+        return;
+      }
+      toast.success("Return requested — we'll be in touch to sort it out.");
+      onDone(data.order);
+    } catch {
+      toast.error("Couldn't submit — please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/40 p-4"
+    >
+      <p className="text-xs font-bold uppercase tracking-widest text-onyx-400">
+        Return {item.name}
+      </p>
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-onyx-600">
+          Reason for return
+        </label>
+        <select
+          value={reasonType}
+          onChange={(e) => setReasonType(e.target.value)}
+          className="h-11 w-full rounded-xl border border-onyx-200 bg-white px-3 text-sm text-onyx-900 outline-none transition-colors focus:border-rose-400"
+        >
+          {RETURN_REASONS.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      </div>
+      <textarea
+        value={details}
+        onChange={(e) => setDetails(e.target.value)}
+        placeholder="Tell us what went wrong (optional)."
+        rows={3}
+        maxLength={600}
+        className="w-full rounded-xl border border-onyx-200 bg-white px-3.5 py-2.5 text-sm text-onyx-900 outline-none transition-colors placeholder:text-onyx-300 focus:border-rose-400"
+      />
+      <div className="flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-5 py-2 text-xs font-bold text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+        >
+          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Request return
         </button>
         <button
           type="button"
